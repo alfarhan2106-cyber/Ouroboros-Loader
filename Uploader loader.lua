@@ -1,6 +1,6 @@
 -- =============================================
---  LOADER OUROBOROS - FIX KHUSUS DELTA
---  Hanya perbaiki tombol & validasi, struktur tetap
+--  LOADER OUROBOROS - VERSI DELTA (TOMBIK KLIK)
+--  FIX: Tombol bisa diklik dengan TouchTap
 -- =============================================
 
 -- [[ KONFIGURASI (SESUAIKAN DENGAN PUNYAMU) ]]
@@ -10,7 +10,7 @@ local CONFIG = {
     MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/joustingmatch/Ouroboros/main/loader.lua"
 }
 
--- [[ FUNGSI GET HWID (TETAP) ]]
+-- [[ FUNGSI GET HWID ]]
 local function get_hwid()
     if syn and syn.get_hwid then return syn.get_hwid() end
     if game:GetService("RbxAnalyticsService") then
@@ -19,9 +19,8 @@ local function get_hwid()
     return os.getenv("USERNAME") or "UnknownHWID"
 end
 
--- [[ FIX 1: HTTP REQUEST KHUSUS DELTA ]]
+-- [[ HTTP REQUEST KHUSUS DELTA ]]
 local function http_request_delta(url)
-    -- Metode HTTP yang umum di Delta
     local methods = {
         function() 
             local result = request({ Url = url, Method = "GET" })
@@ -48,19 +47,24 @@ local function http_request_delta(url)
     return nil
 end
 
--- [[ FUNGSI BUKA BROWSER (TETAP) ]]
+-- [[ FUNGSI BUKA BROWSER ]]
 local function open_browser(url)
-    local methods = {syn and syn.url_open, open_url, function(u) os.execute("start " .. u) end}
+    local methods = {
+        function() open_url(url) end,
+        function() syn and syn.url_open(url) end,
+        function() os.execute("start " .. url) end,
+        function() print("🔗 BUKA LINK: " .. url) end
+    }
     for _, method in ipairs(methods) do
         if method then
-            pcall(method, url)
-            return
+            local success = pcall(method)
+            if success then return true end
         end
     end
-    warn("Buka link manual: " .. url)
+    return false
 end
 
--- [[ FUNGSI BACA/TULIS (TETAP) ]]
+-- [[ FUNGSI BACA/TULIS FILE ]]
 local function read_file(path)
     if readfile then
         local s, d = pcall(readfile, path)
@@ -75,7 +79,7 @@ local function write_file(path, data)
     end
 end
 
--- [[ FIX 2: FUNGSI AMBIL KEY DENGAN ERROR HANDLING ]]
+-- [[ AMBIL DATABASE KEY ]]
 local function fetch_keys_from_remote()
     local response = http_request_delta(CONFIG.KEY_DB_URL)
     if response then
@@ -87,7 +91,7 @@ local function fetch_keys_from_remote()
     return nil
 end
 
--- [[ FUNGSI VERIFIKASI (TETAP) ]]
+-- [[ FUNGSI VERIFIKASI ]]
 local function verify_key(input_key, hwid)
     local key_db = fetch_keys_from_remote()
     if not key_db then
@@ -124,20 +128,22 @@ local function verify_key(input_key, hwid)
     end
 end
 
--- [[ FIX 3: GUI DENGAN EVENT YANG LEBIH KOMPATIBEL ]]
+-- [[ ========== GUI FIX TOTAL UNTUK DELTA ========== ]]
 local function show_gui()
     local player = game.Players.LocalPlayer
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "KeySystem"
     screenGui.Parent = player.PlayerGui
     
+    -- Frame utama
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 380, 0, 220)
-    frame.Position = UDim2.new(0.5, -190, 0.5, -110)
+    frame.Size = UDim2.new(0, 380, 0, 250)
+    frame.Position = UDim2.new(0.5, -190, 0.5, -125)
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
     
+    -- Title
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 40)
     title.Position = UDim2.new(0, 0, 0, 10)
@@ -148,18 +154,19 @@ local function show_gui()
     title.Font = Enum.Font.GothamBold
     title.Parent = frame
     
-    -- Tombol buka shortlink
+    -- === TOMBOL LINK (Dengan TouchTap) ===
     local btnLink = Instance.new("TextButton")
-    btnLink.Size = UDim2.new(0.8, 0, 0, 35)
-    btnLink.Position = UDim2.new(0.1, 0, 0.3, 0)
+    btnLink.Size = UDim2.new(0.8, 0, 0, 40)
+    btnLink.Position = UDim2.new(0.1, 0, 0.28, 0)
     btnLink.BackgroundColor3 = Color3.fromRGB(60, 120, 255)
     btnLink.Text = "🌐 DAPATKAN KEY (Buka Shortlink)"
     btnLink.TextColor3 = Color3.fromRGB(255,255,255)
     btnLink.TextSize = 14
     btnLink.Font = Enum.Font.Gotham
+    btnLink.AutoButtonColor = true
     btnLink.Parent = frame
     
-    -- TextBox input key
+    -- === INPUT KEY ===
     local textBox = Instance.new("TextBox")
     textBox.Size = UDim2.new(0.8, 0, 0, 35)
     textBox.Position = UDim2.new(0.1, 0, 0.52, 0)
@@ -171,18 +178,19 @@ local function show_gui()
     textBox.Font = Enum.Font.Gotham
     textBox.Parent = frame
     
-    -- Tombol Verifikasi
+    -- === TOMBOL VERIFIKASI (Dengan TouchTap) ===
     local btnVerify = Instance.new("TextButton")
-    btnVerify.Size = UDim2.new(0.4, 0, 0, 35)
+    btnVerify.Size = UDim2.new(0.4, 0, 0, 40)
     btnVerify.Position = UDim2.new(0.3, 0, 0.72, 0)
     btnVerify.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
     btnVerify.Text = "✅ VERIFIKASI"
     btnVerify.TextColor3 = Color3.fromRGB(255,255,255)
     btnVerify.TextSize = 16
     btnVerify.Font = Enum.Font.GothamBold
+    btnVerify.AutoButtonColor = true
     btnVerify.Parent = frame
     
-    -- Status label
+    -- === STATUS LABEL ===
     local status = Instance.new("TextLabel")
     status.Size = UDim2.new(1, 0, 0, 30)
     status.Position = UDim2.new(0, 0, 0.9, 0)
@@ -193,16 +201,23 @@ local function show_gui()
     status.Font = Enum.Font.Gotham
     status.Parent = frame
     
-    -- [[ FIX 4: PAKAI .Clicked BUKAN .MouseButton1Click ]]
-    -- Tombol Link
-    btnLink.Clicked:Connect(function()
+    -- ========================================
+    --  FIX UTAMA: EVENT UNTUK DELTA
+    --  Pakai TouchTap dan MouseButton1Click
+    -- ========================================
+    
+    -- Event Tombol Link (pakai 2 metode sekaligus)
+    local function onLinkClick()
         open_browser(CONFIG.SHORTLINK_URL)
         status.Text = "✅ Link dibuka! Cek browser, masukkan key."
         status.TextColor3 = Color3.fromRGB(100, 255, 100)
-    end)
+    end
     
-    -- Tombol Verifikasi
-    btnVerify.Clicked:Connect(function()
+    btnLink.MouseButton1Click:Connect(onLinkClick)
+    btnLink.TouchTap:Connect(onLinkClick)  -- Khusus Delta
+    
+    -- Event Tombol Verifikasi (pakai 2 metode sekaligus)
+    local function onVerifyClick()
         local key = textBox.Text
         if key == "" then
             status.Text = "⚠️ Masukkan key terlebih dahulu!"
@@ -226,7 +241,10 @@ local function show_gui()
             status.Text = "❌ " .. message
             status.TextColor3 = Color3.fromRGB(255, 50, 50)
         end
-    end)
+    end
+    
+    btnVerify.MouseButton1Click:Connect(onVerifyClick)
+    btnVerify.TouchTap:Connect(onVerifyClick)  -- Khusus Delta
 end
 
 -- [[ EKSEKUSI ]]
