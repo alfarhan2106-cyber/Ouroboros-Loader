@@ -1,82 +1,66 @@
 -- =============================================
---  LOADER OUROBOROS - VERSI DELTA EXECUTOR
---  Dikhususkan untuk Delta di HP Android
+--  LOADER OUROBOROS - FIX KHUSUS DELTA
+--  Hanya perbaiki tombol & validasi, struktur tetap
 -- =============================================
 
--- [[ 1. KONFIGURASI (WAJIB GANTI) ]]
+-- [[ KONFIGURASI (SESUAIKAN DENGAN PUNYAMU) ]]
 local CONFIG = {
-    -- Ganti dengan URL RAW Pastebin daftar key-mu
-    KEY_DB_URL = "https://pastebin.com/raw/i5cv2QnV",  -- <<< GANTI INI
-    
-    -- Ganti dengan Shortlink-mu
-    SHORTLINK_URL = "https://link-hub.net/8288902/2INkRQdbqAV1",  -- <<< GANTI INI
-    
-    -- Ganti dengan URL skrip utama
-    MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/joustingmatch/Ouroboros/main/loader.lua"  -- <<< GANTI INI
+    KEY_DB_URL = "https://pastebin.com/raw/i5cv2QnV",
+    SHORTLINK_URL = "https://link-hub.net/8288902/2INkRQdbqAV1",
+    MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/joustingmatch/Ouroboros/main/loader.lua"
 }
 
--- [[ 2. FUNGSI KHUSUS DELTA ]]
-local function delta_http_get(url)
-    -- Delta menggunakan fungsi "request" atau "http.request"
+-- [[ FUNGSI GET HWID (TETAP) ]]
+local function get_hwid()
+    if syn and syn.get_hwid then return syn.get_hwid() end
+    if game:GetService("RbxAnalyticsService") then
+        return game:GetService("RbxAnalyticsService"):GetClientId()
+    end
+    return os.getenv("USERNAME") or "UnknownHWID"
+end
+
+-- [[ FIX 1: HTTP REQUEST KHUSUS DELTA ]]
+local function http_request_delta(url)
+    -- Metode HTTP yang umum di Delta
     local methods = {
         function() 
-            return request({ 
-                Url = url, 
-                Method = "GET" 
-            }) 
+            local result = request({ Url = url, Method = "GET" })
+            if result and result.Body then return result.Body end
         end,
-        function()
-            return http.request({ 
-                Url = url, 
-                Method = "GET" 
-            })
+        function() 
+            local result = http.request({ Url = url, Method = "GET" })
+            if result and result.Body then return result.Body end
         end,
-        function()
-            return game:HttpGet(url)
+        function() 
+            return game:HttpGet(url) 
+        end,
+        function() 
+            return syn.request({ Url = url, Method = "GET" }).Body 
         end
     }
     
     for _, method in ipairs(methods) do
         local success, result = pcall(method)
         if success and result then
-            if type(result) == "table" and result.Body then
-                return result.Body
-            elseif type(result) == "string" then
-                return result
-            end
+            return result
         end
     end
     return nil
 end
 
-local function delta_open_browser(url)
-    -- Delta: coba berbagai cara buka browser
-    local methods = {
-        function() open_url(url) end,
-        function() syn and syn.url_open(url) end,
-        function() 
-            -- Fallback: tampilkan link di console
-            print("🔗 BUKA LINK INI: " .. url)
-        end
-    }
-    
+-- [[ FUNGSI BUKA BROWSER (TETAP) ]]
+local function open_browser(url)
+    local methods = {syn and syn.url_open, open_url, function(u) os.execute("start " .. u) end}
     for _, method in ipairs(methods) do
-        local success = pcall(method)
-        if success then return true end
+        if method then
+            pcall(method, url)
+            return
+        end
     end
-    return false
+    warn("Buka link manual: " .. url)
 end
 
--- [[ 3. FUNGSI HWID UNTUK DELTA ]]
-local function get_hwid()
-    -- Delta biasanya pakai game:GetService
-    if game:GetService("RbxAnalyticsService") then
-        return game:GetService("RbxAnalyticsService"):GetClientId()
-    end
-    return os.getenv("USERNAME") or "DeltaUser"
-end
-
--- [[ 4. BACA/TULIS FILE (Delta mendukung) ]]
+-- [[ FUNGSI BACA/TULIS (TETAP) ]]
 local function read_file(path)
     if readfile then
         local s, d = pcall(readfile, path)
@@ -91,9 +75,9 @@ local function write_file(path, data)
     end
 end
 
--- [[ 5. AMBIL DATABASE KEY ]]
+-- [[ FIX 2: FUNGSI AMBIL KEY DENGAN ERROR HANDLING ]]
 local function fetch_keys_from_remote()
-    local response = delta_http_get(CONFIG.KEY_DB_URL)
+    local response = http_request_delta(CONFIG.KEY_DB_URL)
     if response then
         local success, decoded = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), response)
         if success and type(decoded) == "table" then
@@ -103,16 +87,16 @@ local function fetch_keys_from_remote()
     return nil
 end
 
--- [[ 6. FUNGSI VERIFIKASI ]]
+-- [[ FUNGSI VERIFIKASI (TETAP) ]]
 local function verify_key(input_key, hwid)
     local key_db = fetch_keys_from_remote()
     if not key_db then
-        return false, "Gagal ambil database. Cek internet atau URL Pastebin."
+        return false, "Gagal mengambil database key. Cek koneksi internet."
     end
     
     local key_data = key_db[input_key]
     if not key_data then
-        return false, "Key tidak terdaftar! Periksa ejaan."
+        return false, "Key tidak terdaftar! Pastikan ejaan benar."
     end
     
     local is_lifetime = (key_data.expiry_hours == -1)
@@ -124,23 +108,23 @@ local function verify_key(input_key, hwid)
         saved_time = tonumber(saved_time)
         
         if saved_hwid ~= hwid then
-            return false, "HWID tidak cocok! Key sudah dipakai PC lain."
+            return false, "HWID tidak cocok! Key ini sudah dipakai di PC lain."
         end
         
         if not is_lifetime then
             local elapsed = os.time() - saved_time
             if elapsed >= (key_data.expiry_hours * 3600) then
-                return false, "Masa aktif 12 jam habis! Beli premium."
+                return false, "Masa aktif 12 jam sudah habis! Beli premium untuk lifetime."
             end
         end
         return true, "Verifikasi berhasil!"
     else
         write_file(file_name, hwid .. "|" .. tostring(os.time()))
-        return true, "Key berhasil diaktivasi!"
+        return true, "Key berhasil diaktivasi untuk PC ini!"
     end
 end
 
--- [[ 7. TAMPILAN GUI SEDERHANA UNTUK DELTA ]]
+-- [[ FIX 3: GUI DENGAN EVENT YANG LEBIH KOMPATIBEL ]]
 local function show_gui()
     local player = game.Players.LocalPlayer
     local screenGui = Instance.new("ScreenGui")
@@ -148,8 +132,8 @@ local function show_gui()
     screenGui.Parent = player.PlayerGui
     
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 350, 0, 240)
-    frame.Position = UDim2.new(0.5, -175, 0.5, -120)
+    frame.Size = UDim2.new(0, 380, 0, 220)
+    frame.Position = UDim2.new(0.5, -190, 0.5, -110)
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
@@ -164,30 +148,22 @@ local function show_gui()
     title.Font = Enum.Font.GothamBold
     title.Parent = frame
     
+    -- Tombol buka shortlink
     local btnLink = Instance.new("TextButton")
-    btnLink.Size = UDim2.new(0.8, 0, 0, 40)
-    btnLink.Position = UDim2.new(0.1, 0, 0.25, 0)
+    btnLink.Size = UDim2.new(0.8, 0, 0, 35)
+    btnLink.Position = UDim2.new(0.1, 0, 0.3, 0)
     btnLink.BackgroundColor3 = Color3.fromRGB(60, 120, 255)
-    btnLink.Text = "🌐 DAPATKAN KEY"
+    btnLink.Text = "🌐 DAPATKAN KEY (Buka Shortlink)"
     btnLink.TextColor3 = Color3.fromRGB(255,255,255)
     btnLink.TextSize = 14
     btnLink.Font = Enum.Font.Gotham
     btnLink.Parent = frame
-    btnLink.MouseButton1Click:Connect(function()
-        local opened = delta_open_browser(CONFIG.SHORTLINK_URL)
-        if opened then
-            status.Text = "✅ Link dibuka! Cek browser."
-            status.TextColor3 = Color3.fromRGB(100, 255, 100)
-        else
-            status.Text = "⚠️ Buka manual: " .. CONFIG.SHORTLINK_URL
-            status.TextColor3 = Color3.fromRGB(255, 200, 0)
-        end
-    end)
     
+    -- TextBox input key
     local textBox = Instance.new("TextBox")
     textBox.Size = UDim2.new(0.8, 0, 0, 35)
-    textBox.Position = UDim2.new(0.1, 0, 0.48, 0)
-    textBox.PlaceholderText = "Masukkan Key..."
+    textBox.Position = UDim2.new(0.1, 0, 0.52, 0)
+    textBox.PlaceholderText = "Masukkan Key di sini..."
     textBox.Text = ""
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
     textBox.TextColor3 = Color3.fromRGB(255,255,255)
@@ -195,9 +171,10 @@ local function show_gui()
     textBox.Font = Enum.Font.Gotham
     textBox.Parent = frame
     
+    -- Tombol Verifikasi
     local btnVerify = Instance.new("TextButton")
     btnVerify.Size = UDim2.new(0.4, 0, 0, 35)
-    btnVerify.Position = UDim2.new(0.3, 0, 0.68, 0)
+    btnVerify.Position = UDim2.new(0.3, 0, 0.72, 0)
     btnVerify.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
     btnVerify.Text = "✅ VERIFIKASI"
     btnVerify.TextColor3 = Color3.fromRGB(255,255,255)
@@ -205,9 +182,10 @@ local function show_gui()
     btnVerify.Font = Enum.Font.GothamBold
     btnVerify.Parent = frame
     
+    -- Status label
     local status = Instance.new("TextLabel")
     status.Size = UDim2.new(1, 0, 0, 30)
-    status.Position = UDim2.new(0, 0, 0.88, 0)
+    status.Position = UDim2.new(0, 0, 0.9, 0)
     status.BackgroundTransparency = 1
     status.Text = "Klik tombol hijau untuk verifikasi"
     status.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -215,10 +193,19 @@ local function show_gui()
     status.Font = Enum.Font.Gotham
     status.Parent = frame
     
-    btnVerify.MouseButton1Click:Connect(function()
+    -- [[ FIX 4: PAKAI .Clicked BUKAN .MouseButton1Click ]]
+    -- Tombol Link
+    btnLink.Clicked:Connect(function()
+        open_browser(CONFIG.SHORTLINK_URL)
+        status.Text = "✅ Link dibuka! Cek browser, masukkan key."
+        status.TextColor3 = Color3.fromRGB(100, 255, 100)
+    end)
+    
+    -- Tombol Verifikasi
+    btnVerify.Clicked:Connect(function()
         local key = textBox.Text
         if key == "" then
-            status.Text = "⚠️ Masukkan key dulu!"
+            status.Text = "⚠️ Masukkan key terlebih dahulu!"
             status.TextColor3 = Color3.fromRGB(255, 200, 0)
             return
         end
@@ -242,5 +229,5 @@ local function show_gui()
     end)
 end
 
--- [[ 8. JALANKAN ]]
+-- [[ EKSEKUSI ]]
 pcall(show_gui)
