@@ -1,51 +1,89 @@
 -- =============================================
---  LOADER OUROBOROS + SISTEM KEY (HWID + EXPIRY)
---  IKUTI PANDUAN UNTUK MENGGANTI BAGIAN YANG WAJIB
+--  LOADER OUROBOROS - VERSI HP/ALL EXECUTOR
+--  Lebih kompatibel dan error handling jelas
 -- =============================================
 
 -- [[ 1. KONFIGURASI (WAJIB GANTI) ]]
 local CONFIG = {
     -- Ganti dengan URL RAW Pastebin daftar key-mu
-    KEY_DB_URL = "https://pastebin.com/raw/i5cv2QnV", -- <<< GANTI INI
+    KEY_DB_URL = "https://pastebin.com/raw/i5cv2QnV",  -- <<< GANTI INI
     
     -- Ganti dengan Shortlink-mu (Linkvertise / Adf.ly)
-    SHORTLINK_URL = "https://link-hub.net/8288902/2INkRQdbqAV1", -- <<< GANTI INI
+    SHORTLINK_URL = "https://link-hub.net/8288902/2INkRQdbqAV1",  -- <<< GANTI INI
     
-    -- Ganti dengan URL skrip utama Ouroboros (bisa taruh di repo ini juga)
-    MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/joustingmatch/Ouroboros/main/loader.lua" -- <<< GANTI INI (misal kamu buat file main_script.lua nanti)
+    -- Ganti dengan URL skrip utama Ouroboros
+    MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/joustingmatch/Ouroboros/main/loader.lua"  -- <<< GANTI INI
 }
 
--- [[ 2. FUNGSI DASAR UNTUK EKSEKUTOR (JANGAN DIUBAH) ]]
-local function get_hwid()
-    if syn and syn.get_hwid then return syn.get_hwid() end
-    if game:GetService("RbxAnalyticsService") then
-        return game:GetService("RbxAnalyticsService"):GetClientId()
-    end
-    return os.getenv("USERNAME") or "UnknownHWID"
-end
-
-local function http_request(data)
-    local methods = {syn and syn.request, http_request, request, http and http.request}
+-- [[ 2. FUNGSI HTTP YANG PALING KOMPATIBEL ]]
+local function http_get(url)
+    -- Daftar semua kemungkinan metode HTTP
+    local methods = {
+        syn and syn.request,
+        http_request,
+        request,
+        http and http.request,
+        game and game:HttpGet  -- Fallback untuk executor yang support game:HttpGet
+    }
+    
     for _, method in ipairs(methods) do
         if method then
-            local success, result = pcall(method, data)
-            if success then return result end
+            local success, result = pcall(function()
+                -- Jika method adalah function, panggil dengan cara yang sesuai
+                if method == game:HttpGet then
+                    return method(url)
+                else
+                    -- Untuk syn.request, http_request, dll, gunakan format table
+                    return method({
+                        Url = url,
+                        Method = "GET"
+                    })
+                end
+            end)
+            if success and result then
+                -- Jika hasilnya table (syn.request), ambil Body
+                if type(result) == "table" and result.Body then
+                    return result.Body
+                elseif type(result) == "string" then
+                    return result
+                end
+            end
         end
     end
-    error("Tidak ada metode HTTP yang didukung oleh executor ini!")
+    return nil -- Gagal semua metode
 end
 
+-- [[ 3. FUNGSI BUKA BROWSER YANG KOMPATIBEL ]]
 local function open_browser(url)
-    local methods = {syn and syn.url_open, open_url, function(u) os.execute("start " .. u) end}
+    local methods = {
+        syn and syn.url_open,
+        open_url,
+        function(u) 
+            if shell and shell.execute then 
+                shell.execute("start " .. u) 
+            end 
+        end,
+        function(u)
+            -- Alternatif: pake msgbox atau print biar user buka manual
+            print("🔗 BUKA LINK INI DI BROWSER: " .. u)
+            return "manual"
+        end
+    }
+    
     for _, method in ipairs(methods) do
         if method then
-            pcall(method, url)
-            return
+            local success = pcall(method, url)
+            if success then
+                return true
+            end
         end
     end
-    warn("Buka link manual: " .. url)
+    -- Jika semua gagal, beri tahu user buka manual
+    print("⚠️ Gagal membuka browser otomatis. Buka manual: " .. url)
+    return false
 end
 
+-- [[ 4. FUNGSI BACA/TULIS FILE ]]
 local function read_file(path)
     if readfile then
         local s, d = pcall(readfile, path)
@@ -60,26 +98,23 @@ local function write_file(path, data)
     end
 end
 
--- [[ 3. AMBIL DAFTAR KEY DARI PASTEBIN (REMOTE) ]]
+-- [[ 5. AMBIL DATABASE KEY DARI PASTEBIN ]]
 local function fetch_keys_from_remote()
-    local response = http_request({
-        Url = CONFIG.KEY_DB_URL,
-        Method = "GET"
-    })
-    if response and response.Body then
-        local decoded = game:GetService("HttpService"):JSONDecode(response.Body)
-        if type(decoded) == "table" then
+    local response = http_get(CONFIG.KEY_DB_URL)
+    if response then
+        local success, decoded = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), response)
+        if success and type(decoded) == "table" then
             return decoded
         end
     end
     return nil
 end
 
--- [[ 4. FUNGSI VERIFIKASI UTAMA ]]
+-- [[ 6. FUNGSI VERIFIKASI ]]
 local function verify_key(input_key, hwid)
     local key_db = fetch_keys_from_remote()
     if not key_db then
-        return false, "Gagal mengambil database key. Cek koneksi internet."
+        return false, "Gagal mengambil database key. Cek koneksi internet atau URL Pastebin salah."
     end
     
     local key_data = key_db[input_key]
@@ -107,13 +142,21 @@ local function verify_key(input_key, hwid)
         end
         return true, "Verifikasi berhasil!"
     else
-        -- Aktivasi pertama
         write_file(file_name, hwid .. "|" .. tostring(os.time()))
         return true, "Key berhasil diaktivasi untuk PC ini!"
     end
 end
 
--- [[ 5. TAMPILAN GUI ]]
+-- [[ 7. FUNGSI GET HWID ]]
+local function get_hwid()
+    if syn and syn.get_hwid then return syn.get_hwid() end
+    if game:GetService("RbxAnalyticsService") then
+        return game:GetService("RbxAnalyticsService"):GetClientId()
+    end
+    return os.getenv("USERNAME") or "UnknownHWID"
+end
+
+-- [[ 8. TAMPILAN GUI YANG LEBIH ROBUST ]]
 local function show_gui()
     local player = game.Players.LocalPlayer
     local screenGui = Instance.new("ScreenGui")
@@ -121,8 +164,8 @@ local function show_gui()
     screenGui.Parent = player.PlayerGui
     
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 380, 0, 220)
-    frame.Position = UDim2.new(0.5, -190, 0.5, -110)
+    frame.Size = UDim2.new(0, 380, 0, 250)
+    frame.Position = UDim2.new(0.5, -190, 0.5, -125)
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
@@ -139,8 +182,8 @@ local function show_gui()
     
     -- Tombol buka shortlink
     local btnLink = Instance.new("TextButton")
-    btnLink.Size = UDim2.new(0.8, 0, 0, 35)
-    btnLink.Position = UDim2.new(0.1, 0, 0.3, 0)
+    btnLink.Size = UDim2.new(0.8, 0, 0, 40)
+    btnLink.Position = UDim2.new(0.1, 0, 0.25, 0)
     btnLink.BackgroundColor3 = Color3.fromRGB(60, 120, 255)
     btnLink.Text = "🌐 DAPATKAN KEY (Buka Shortlink)"
     btnLink.TextColor3 = Color3.fromRGB(255,255,255)
@@ -148,15 +191,20 @@ local function show_gui()
     btnLink.Font = Enum.Font.Gotham
     btnLink.Parent = frame
     btnLink.MouseButton1Click:Connect(function()
-        open_browser(CONFIG.SHORTLINK_URL)
-        status.Text = "✅ Link dibuka! Cek browser, masukkan key."
-        status.TextColor3 = Color3.fromRGB(100, 255, 100)
+        local opened = open_browser(CONFIG.SHORTLINK_URL)
+        if opened then
+            status.Text = "✅ Link dibuka! Cek browser, lalu masukkan key."
+            status.TextColor3 = Color3.fromRGB(100, 255, 100)
+        else
+            status.Text = "⚠️ Gagal buka browser. Buka manual: " .. CONFIG.SHORTLINK_URL
+            status.TextColor3 = Color3.fromRGB(255, 200, 0)
+        end
     end)
     
     -- TextBox input key
     local textBox = Instance.new("TextBox")
     textBox.Size = UDim2.new(0.8, 0, 0, 35)
-    textBox.Position = UDim2.new(0.1, 0, 0.52, 0)
+    textBox.Position = UDim2.new(0.1, 0, 0.48, 0)
     textBox.PlaceholderText = "Masukkan Key di sini..."
     textBox.Text = ""
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
@@ -168,7 +216,7 @@ local function show_gui()
     -- Tombol Verifikasi
     local btnVerify = Instance.new("TextButton")
     btnVerify.Size = UDim2.new(0.4, 0, 0, 35)
-    btnVerify.Position = UDim2.new(0.3, 0, 0.72, 0)
+    btnVerify.Position = UDim2.new(0.3, 0, 0.68, 0)
     btnVerify.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
     btnVerify.Text = "✅ VERIFIKASI"
     btnVerify.TextColor3 = Color3.fromRGB(255,255,255)
@@ -179,7 +227,7 @@ local function show_gui()
     -- Status label
     local status = Instance.new("TextLabel")
     status.Size = UDim2.new(1, 0, 0, 30)
-    status.Position = UDim2.new(0, 0, 0.9, 0)
+    status.Position = UDim2.new(0, 0, 0.88, 0)
     status.BackgroundTransparency = 1
     status.Text = "Klik tombol hijau untuk verifikasi"
     status.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -207,8 +255,6 @@ local function show_gui()
             status.TextColor3 = Color3.fromRGB(0, 255, 0)
             wait(0.8)
             screenGui:Destroy()
-            
-            -- Jalankan skrip utama
             loadstring(game:HttpGet(CONFIG.MAIN_SCRIPT_URL))()
         else
             status.Text = "❌ " .. message
@@ -217,5 +263,5 @@ local function show_gui()
     end)
 end
 
--- [[ 6. EKSEKUSI ]]
+-- [[ 9. JALANKAN ]]
 pcall(show_gui)
